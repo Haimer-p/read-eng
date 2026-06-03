@@ -1,6 +1,7 @@
 "use client";
 
 import { AudioPlayer } from "@/components/AudioPlayer";
+import { BookmarkPanel } from "@/components/BookmarkPanel";
 import { ModeSelector } from "@/components/ModeSelector";
 import { ReaderControls } from "@/components/ReaderControls";
 import { ScriptEditor } from "@/components/ScriptEditor";
@@ -57,6 +58,8 @@ export default function Home() {
             Figma design →
           </a>
         </header>
+
+        <BookmarkPanel />
 
         <section className="card animate-in animate-in-delay-1">
           <ModeSelector />
