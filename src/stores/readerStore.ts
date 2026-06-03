@@ -47,7 +47,7 @@ export const useReaderStore = create<ReaderState>((set, get) => ({
   selectedIndex: null,
   playback: "idle",
   speed: 1,
-  voiceLang: "en-US",
+  voiceLang: "en-GB",
   useAiEnhancement: true,
   audioUrl: null,
   isEnhancing: false,
@@ -74,6 +74,7 @@ export const useReaderStore = create<ReaderState>((set, get) => ({
     set({
       enhancedScript,
       sentences: splitEnhancedSentences(enhancedScript),
+      error: null,
     }),
   setIsEnhancing: (isEnhancing) => set({ isEnhancing }),
   setError: (error) => set({ error }),

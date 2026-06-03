@@ -5,25 +5,43 @@ type KeyState = {
 
 const ROTATABLE_STATUSES = new Set([429, 403, 500, 503]);
 
-function loadKeys(): string[] {
-  const keys = [
+function loadEnvKeys(): string[] {
+  return [
+    process.env.GEMINI_API_KEY,
     process.env.GEMINI_API_KEY_1,
     process.env.GEMINI_API_KEY_2,
     process.env.GEMINI_API_KEY_3,
   ].filter((k): k is string => Boolean(k && k.trim()));
+}
 
-  if (keys.length === 0) {
-    throw new Error("No GEMINI_API_KEY_* configured");
+export function countEnvGeminiKeys(): number {
+  return loadEnvKeys().length;
+}
+
+/** User keys first (UI), then .env — deduped. */
+export function resolveGeminiKeys(clientKeys: string[] = []): string[] {
+  const trimmedClient = clientKeys.map((k) => k.trim()).filter(Boolean);
+  const env = loadEnvKeys();
+  const merged = [...trimmedClient, ...env];
+  const unique = [...new Set(merged)];
+
+  if (unique.length === 0) {
+    throw new Error(
+      "Chưa có Gemini API key — thêm trong Cài đặt hoặc .env.local (https://aistudio.google.com/apikey)",
+    );
   }
-  return keys;
+
+  const aiStudio = unique.filter((k) => k.startsWith("AIza"));
+  const other = unique.filter((k) => !k.startsWith("AIza"));
+  return [...aiStudio, ...other];
 }
 
 export class GeminiKeyManager {
   private keys: KeyState[];
   private index = 0;
 
-  constructor() {
-    this.keys = loadKeys().map((key) => ({ key, errorCount: 0 }));
+  constructor(keyList: string[]) {
+    this.keys = keyList.map((key) => ({ key, errorCount: 0 }));
   }
 
   getNextKey(): string {
@@ -55,13 +73,14 @@ export class GeminiKeyManager {
 
 export async function withGeminiKeys<T>(
   fn: (apiKey: string) => Promise<T>,
+  clientKeys: string[] = [],
 ): Promise<T> {
-  const manager = new GeminiKeyManager();
-  const totalKeys = loadKeys().length;
+  const allKeys = resolveGeminiKeys(clientKeys);
+  const manager = new GeminiKeyManager(allKeys);
   const tried = new Set<string>();
   let lastError: unknown;
 
-  while (tried.size < totalKeys) {
+  while (tried.size < allKeys.length) {
     const key = manager.getNextKey();
     if (tried.has(key)) break;
     tried.add(key);
