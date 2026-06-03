@@ -1,6 +1,9 @@
 "use client";
 
+import { AppLogo } from "@/components/AppLogo";
 import { AudioPlayer } from "@/components/AudioPlayer";
+import { BookmarkPanel } from "@/components/BookmarkPanel";
+import { GeminiKeySettings } from "@/components/GeminiKeySettings";
 import { ModeSelector } from "@/components/ModeSelector";
 import { ReaderControls } from "@/components/ReaderControls";
 import { ScriptEditor } from "@/components/ScriptEditor";
@@ -16,6 +19,7 @@ export default function Home() {
 
   const {
     audioRef,
+    requestEnhance,
     startMp3,
     pauseMp3,
     resumeMp3,
@@ -39,24 +43,18 @@ export default function Home() {
 
       <main className="app-shell mx-auto flex min-h-full w-full max-w-3xl flex-col gap-4 px-4 py-8 sm:px-6">
         <header className="animate-in">
-          <span className="badge mb-3">
+          <span className="badge mb-4">
             {isMp3 ? "Mode 1 · Audio sync" : "Mode 2 · TTS + Gemini"}
           </span>
-          <h1 className="header-title text-4xl font-bold tracking-tight sm:text-5xl">
-            ENGLISH READER
-          </h1>
-          <p className="mt-2 max-w-md text-sm text-[var(--color-muted)]">
-            Learn with rhythm — MP3 sync hoặc giọng AI tự nhiên hơn
+          <AppLogo size={56} showWordmark className="mb-3" />
+          <p className="max-w-md text-sm text-[var(--color-muted)]">
+            MP3 sync hoặc giọng AI tự nhiên hơn — học tiếng Anh theo nhịp
           </p>
-          <a
-            href="https://www.figma.com/design/ExwSmiQBJgtgH6cAAQFM9f"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="mt-3 inline-flex items-center gap-1 text-xs text-[var(--color-accent)] transition hover:opacity-80"
-          >
-            Figma design →
-          </a>
         </header>
+
+        <BookmarkPanel />
+
+        <GeminiKeySettings />
 
         <section className="card animate-in animate-in-delay-1">
           <ModeSelector />
@@ -71,7 +69,7 @@ export default function Home() {
             onEnded={handleAudioEnded}
           />
         ) : (
-          <TtsPanel />
+          <TtsPanel onEnhance={() => void requestEnhance()} />
         )}
 
         <div className="animate-in animate-in-delay-4">
