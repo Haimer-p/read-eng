@@ -12,14 +12,28 @@ import { TtsPanel } from "@/components/TtsPanel";
 import { useReaderPlayback } from "@/hooks/useReaderPlayback";
 import { useReaderStore } from "@/stores/readerStore";
 
+function playbackStatusLabel(
+  playback: string,
+  scope: string,
+): string | null {
+  if (playback === "idle") return null;
+  if (playback === "paused") return "Tạm dừng";
+  if (scope === "full") return "Đang đọc toàn bộ";
+  if (scope === "sentence") return "Đang nghe câu chọn";
+  if (scope === "selection") return "Đang đọc vùng bôi đen";
+  return "Đang phát";
+}
+
 export default function Home() {
   const mode = useReaderStore((s) => s.mode);
   const error = useReaderStore((s) => s.error);
   const playback = useReaderStore((s) => s.playback);
+  const playbackScope = useReaderStore((s) => s.playbackScope);
 
   const {
     audioRef,
     requestEnhance,
+    playSentenceAt,
     startMp3,
     pauseMp3,
     resumeMp3,
@@ -29,12 +43,12 @@ export default function Home() {
     resumeTts,
     stopTts,
     readSelection,
-    readSelectedSentence,
     handleAudioTimeUpdate,
     handleAudioEnded,
   } = useReaderPlayback();
 
   const isMp3 = mode === "mp3";
+  const statusLabel = playbackStatusLabel(playback, playbackScope);
 
   return (
     <>
@@ -88,11 +102,11 @@ export default function Home() {
           </p>
         )}
 
-        {playback !== "idle" && (
+        {statusLabel && (
           <p className="status-pill animate-in w-fit">
             {playback === "playing" ? (
               <>
-                Đang phát
+                {statusLabel}
                 <span className="playing-indicator">
                   <span />
                   <span />
@@ -100,13 +114,15 @@ export default function Home() {
                 </span>
               </>
             ) : (
-              "Tạm dừng"
+              statusLabel
             )}
           </p>
         )}
 
         <SentenceList
-          onSentenceClick={isMp3 ? undefined : () => readSelectedSentence()}
+          onSentenceClick={
+            isMp3 ? undefined : (index) => void playSentenceAt(index)
+          }
         />
       </main>
     </>
