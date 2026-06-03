@@ -5,6 +5,8 @@ import type { SpeedOption } from "@/lib/tts";
 
 type PlaybackState = "idle" | "playing" | "paused";
 
+export type PlaybackScope = "none" | "full" | "sentence" | "selection";
+
 type ReaderState = {
   mode: ReaderMode;
   script: string;
@@ -13,6 +15,7 @@ type ReaderState = {
   currentIndex: number;
   selectedIndex: number | null;
   playback: PlaybackState;
+  playbackScope: PlaybackScope;
   speed: SpeedOption;
   voiceLang: string;
   useAiEnhancement: boolean;
@@ -33,19 +36,21 @@ type ReaderState = {
   setIsEnhancing: (value: boolean) => void;
   setError: (error: string | null) => void;
   setPlayback: (playback: PlaybackState) => void;
+  setPlaybackScope: (scope: PlaybackScope) => void;
   requestStop: () => void;
   clearStop: () => void;
   resetPlayback: () => void;
 };
 
-export const useReaderStore = create<ReaderState>((set, get) => ({
-  mode: "mp3",
+export const useReaderStore = create<ReaderState>((set) => ({
+  mode: "tts",
   script: "",
   sentences: [],
   enhancedScript: "",
   currentIndex: 0,
   selectedIndex: null,
   playback: "idle",
+  playbackScope: "none",
   speed: 1,
   voiceLang: "en-GB",
   useAiEnhancement: true,
@@ -79,12 +84,13 @@ export const useReaderStore = create<ReaderState>((set, get) => ({
   setIsEnhancing: (isEnhancing) => set({ isEnhancing }),
   setError: (error) => set({ error }),
   setPlayback: (playback) => set({ playback }),
+  setPlaybackScope: (playbackScope) => set({ playbackScope }),
   requestStop: () => set({ stopRequested: true, playback: "idle" }),
   clearStop: () => set({ stopRequested: false }),
   resetPlayback: () =>
     set({
       playback: "idle",
-      currentIndex: 0,
+      playbackScope: "none",
       stopRequested: false,
     }),
 }));

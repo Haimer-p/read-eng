@@ -14,6 +14,7 @@ import { useReaderStore } from "@/stores/readerStore";
 export function useReaderPlayback() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const enhanceInFlight = useRef<Promise<void> | null>(null);
+  const playbackGeneration = useRef(0);
   const store = useReaderStore();
 
   useEffect(() => {
@@ -21,28 +22,51 @@ export function useReaderPlayback() {
   }, []);
 
   const getTtsSentences = useCallback(() => {
-    const useEnhanced = store.useAiEnhancement && store.enhancedScript;
-    const text = useEnhanced ? store.enhancedScript : store.script;
+    const state = useReaderStore.getState();
+    const useEnhanced = state.useAiEnhancement && state.enhancedScript;
+    const text = useEnhanced ? state.enhancedScript : state.script;
     return useEnhanced
       ? splitEnhancedSentences(text)
       : splitSentences(text);
-  }, [store.useAiEnhancement, store.enhancedScript, store.script]);
+  }, []);
+
+  const stopAllPlayback = useCallback(async () => {
+    const state = useReaderStore.getState();
+    state.requestStop();
+    await stopSpeech();
+    const audio = audioRef.current;
+    if (audio) {
+      audio.pause();
+    }
+    playbackGeneration.current += 1;
+    state.setPlaybackScope("none");
+    state.setPlayback("idle");
+  }, []);
+
+  const finishIfCurrent = useCallback((gen: number) => {
+    if (playbackGeneration.current !== gen) return;
+    const state = useReaderStore.getState();
+    if (state.stopRequested) return;
+    state.setPlayback("idle");
+    state.setPlaybackScope("none");
+  }, []);
 
   const requestEnhance = useCallback(async () => {
-    if (!store.script.trim()) {
-      store.setError("Vui lòng nhập script trước.");
+    const state = useReaderStore.getState();
+    if (!state.script.trim()) {
+      state.setError("Vui lòng nhập script trước.");
       return;
     }
-    if (store.enhancedScript) {
-      store.setError(null);
+    if (state.enhancedScript) {
+      state.setError(null);
       return;
     }
     if (enhanceInFlight.current) {
       return enhanceInFlight.current;
     }
 
-    store.setIsEnhancing(true);
-    store.setError(null);
+    state.setIsEnhancing(true);
+    state.setError(null);
 
     const task = (async () => {
       try {
@@ -50,7 +74,10 @@ export function useReaderPlayback() {
         const res = await fetch("/api/enhance", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ script: store.script, clientKeys }),
+          body: JSON.stringify({
+            script: state.script,
+            clientKeys,
+          }),
         });
         const data = (await res.json()) as {
           enhancedText?: string;
@@ -60,70 +87,110 @@ export function useReaderPlayback() {
         if (!res.ok) {
           throw new Error(data.error ?? "Enhancement failed");
         }
-        store.setEnhancedScript(data.enhancedText ?? "");
-        if (data.cached) {
-          store.setError(null);
-        }
+        useReaderStore.getState().setEnhancedScript(data.enhancedText ?? "");
       } catch (e) {
-        store.setError(e instanceof Error ? e.message : "Enhancement failed");
+        useReaderStore
+          .getState()
+          .setError(e instanceof Error ? e.message : "Enhancement failed");
         throw e;
       } finally {
-        store.setIsEnhancing(false);
+        useReaderStore.getState().setIsEnhancing(false);
         enhanceInFlight.current = null;
       }
     })();
 
     enhanceInFlight.current = task;
     return task;
-  }, [store]);
+  }, []);
 
   const startMp3 = useCallback(async () => {
-    if (!store.audioUrl) {
-      store.setError("Vui lòng upload file MP3.");
+    const state = useReaderStore.getState();
+    if (!state.audioUrl) {
+      state.setError("Vui lòng upload file MP3.");
       return;
     }
-    if (!store.script.trim()) {
-      store.setError("Vui lòng nhập script.");
+    if (!state.script.trim()) {
+      state.setError("Vui lòng nhập script.");
       return;
     }
 
+    await stopAllPlayback();
     const audio = audioRef.current;
     if (!audio) return;
 
-    store.setError(null);
-    store.clearStop();
-    store.setPlayback("playing");
+    state.setError(null);
+    state.clearStop();
+    state.setPlayback("playing");
     audio.currentTime = 0;
     await audio.play();
-  }, [store]);
+  }, [stopAllPlayback]);
 
   const pauseMp3 = useCallback(() => {
     audioRef.current?.pause();
-    store.setPlayback("paused");
-  }, [store]);
+    useReaderStore.getState().setPlayback("paused");
+  }, []);
 
   const resumeMp3 = useCallback(async () => {
     await audioRef.current?.play();
-    store.setPlayback("playing");
-  }, [store]);
+    useReaderStore.getState().setPlayback("playing");
+  }, []);
 
-  const stopMp3 = useCallback(() => {
+  const stopMp3 = useCallback(async () => {
     const audio = audioRef.current;
     if (audio) {
       audio.pause();
       audio.currentTime = 0;
     }
-    store.resetPlayback();
-  }, [store]);
+    await stopAllPlayback();
+    useReaderStore.getState().resetPlayback();
+  }, [stopAllPlayback]);
+
+  const playSentenceAt = useCallback(
+    async (index: number) => {
+      const state = useReaderStore.getState();
+      const sentences = state.sentences;
+      const sentence = sentences[index];
+      if (!sentence) return;
+
+      await stopAllPlayback();
+
+      const gen = playbackGeneration.current;
+      const s = useReaderStore.getState();
+      s.clearStop();
+      s.selectSentence(index);
+      s.setCurrentIndex(index);
+      s.setPlaybackScope("sentence");
+      s.setPlayback("playing");
+      s.setError(null);
+
+      try {
+        await speakText(sentence, {
+          rate: s.speed,
+          voiceLang: s.voiceLang,
+          cancelFirst: false,
+        });
+      } catch (e) {
+        if (playbackGeneration.current === gen) {
+          s.setError(
+            e instanceof Error ? e.message : "Không phát được giọng đọc.",
+          );
+        }
+      } finally {
+        finishIfCurrent(gen);
+      }
+    },
+    [stopAllPlayback, finishIfCurrent],
+  );
 
   const startTts = useCallback(async () => {
-    if (!store.script.trim()) {
-      store.setError("Vui lòng nhập script.");
+    const state = useReaderStore.getState();
+    if (!state.script.trim()) {
+      state.setError("Vui lòng nhập script.");
       return;
     }
 
-    if (store.useAiEnhancement && !store.enhancedScript) {
-      store.setError(
+    if (state.useAiEnhancement && !state.enhancedScript) {
+      state.setError(
         "Bật AI Enhancement: nhấn «Enhance với AI» trước khi Start (tránh gọi API tự động).",
       );
       return;
@@ -131,113 +198,117 @@ export function useReaderPlayback() {
 
     const sentences = getTtsSentences();
     if (sentences.length === 0) {
-      store.setError("Không có câu nào để đọc.");
+      state.setError("Không có câu nào để đọc.");
       return;
     }
 
-    const startIndex = store.selectedIndex ?? 0;
+    await stopAllPlayback();
+
+    const gen = playbackGeneration.current;
+    const s = useReaderStore.getState();
+    const startIndex = s.selectedIndex ?? 0;
     const slice = sentences.slice(startIndex);
 
-    store.setError(null);
-    store.clearStop();
-    store.setPlayback("playing");
+    s.setError(null);
+    s.clearStop();
+    s.setPlaybackScope("full");
+    s.setPlayback("playing");
 
     try {
       await speakSentences(slice, {
-        rate: store.speed,
-        voiceLang: store.voiceLang,
-        onIndex: (i) => store.setCurrentIndex(startIndex + i),
-        shouldStop: () => useReaderStore.getState().stopRequested,
+        rate: s.speed,
+        voiceLang: s.voiceLang,
+        onIndex: (i) => {
+          if (playbackGeneration.current !== gen) return;
+          useReaderStore.getState().setCurrentIndex(startIndex + i);
+        },
+        shouldStop: () => {
+          const current = useReaderStore.getState();
+          return (
+            current.stopRequested || playbackGeneration.current !== gen
+          );
+        },
       });
     } catch (e) {
-      store.setError(
-        e instanceof Error ? e.message : "Không phát được giọng đọc.",
-      );
-    } finally {
-      if (!useReaderStore.getState().stopRequested) {
-        store.setPlayback("idle");
+      if (playbackGeneration.current === gen) {
+        s.setError(
+          e instanceof Error ? e.message : "Không phát được giọng đọc.",
+        );
       }
+    } finally {
+      finishIfCurrent(gen);
     }
-  }, [store, getTtsSentences]);
+  }, [getTtsSentences, stopAllPlayback, finishIfCurrent]);
 
   const pauseTts = useCallback(() => {
+    const state = useReaderStore.getState();
+    if (state.playbackScope !== "full") return;
     window.speechSynthesis.pause();
-    store.setPlayback("paused");
-  }, [store]);
+    state.setPlayback("paused");
+  }, []);
 
   const resumeTts = useCallback(() => {
+    const state = useReaderStore.getState();
+    if (state.playbackScope !== "full") return;
     window.speechSynthesis.resume();
-    store.setPlayback("playing");
-  }, [store]);
+    state.setPlayback("playing");
+  }, []);
 
-  const stopTts = useCallback(() => {
-    store.requestStop();
-    void stopSpeech();
-    store.resetPlayback();
-  }, [store]);
+  const stopTts = useCallback(async () => {
+    await stopAllPlayback();
+    useReaderStore.getState().resetPlayback();
+  }, [stopAllPlayback]);
 
   const readSelection = useCallback(async () => {
     const selection = window.getSelection()?.toString().trim();
     if (!selection) return;
 
-    store.clearStop();
-    store.setPlayback("playing");
+    await stopAllPlayback();
+
+    const gen = playbackGeneration.current;
+    const s = useReaderStore.getState();
+    s.clearStop();
+    s.setPlaybackScope("selection");
+    s.setPlayback("playing");
+    s.setError(null);
+
     try {
       await speakText(selection, {
-        rate: store.speed,
-        voiceLang: store.voiceLang,
-        cancelFirst: true,
+        rate: s.speed,
+        voiceLang: s.voiceLang,
+        cancelFirst: false,
       });
     } catch (e) {
-      store.setError(
-        e instanceof Error ? e.message : "Không phát được giọng đọc.",
-      );
+      if (playbackGeneration.current === gen) {
+        s.setError(
+          e instanceof Error ? e.message : "Không phát được giọng đọc.",
+        );
+      }
     } finally {
-      store.setPlayback("idle");
+      finishIfCurrent(gen);
     }
-  }, [store]);
-
-  const readSelectedSentence = useCallback(async () => {
-    if (store.selectedIndex === null) return;
-    const sentence = store.sentences[store.selectedIndex];
-    if (!sentence) return;
-
-    store.clearStop();
-    store.setPlayback("playing");
-    store.setCurrentIndex(store.selectedIndex);
-    try {
-      await speakText(sentence, {
-        rate: store.speed,
-        voiceLang: store.voiceLang,
-        cancelFirst: true,
-      });
-    } catch (e) {
-      store.setError(
-        e instanceof Error ? e.message : "Không phát được giọng đọc.",
-      );
-    } finally {
-      store.setPlayback("idle");
-    }
-  }, [store]);
+  }, [stopAllPlayback, finishIfCurrent]);
 
   const handleAudioTimeUpdate = useCallback(() => {
     const audio = audioRef.current;
-    if (!audio || !audio.duration || store.sentences.length === 0) return;
+    const state = useReaderStore.getState();
+    if (!audio || !audio.duration || state.sentences.length === 0) return;
 
     const index = Math.min(
-      store.sentences.length - 1,
-      Math.floor((audio.currentTime / audio.duration) * store.sentences.length),
+      state.sentences.length - 1,
+      Math.floor((audio.currentTime / audio.duration) * state.sentences.length),
     );
-    store.setCurrentIndex(index);
-  }, [store]);
+    state.setCurrentIndex(index);
+  }, []);
 
   const handleAudioEnded = useCallback(() => {
-    store.resetPlayback();
-  }, [store]);
+    useReaderStore.getState().resetPlayback();
+  }, []);
 
   return {
     audioRef,
     requestEnhance,
+    playSentenceAt,
     startMp3,
     pauseMp3,
     resumeMp3,
@@ -247,7 +318,6 @@ export function useReaderPlayback() {
     resumeTts,
     stopTts,
     readSelection,
-    readSelectedSentence,
     handleAudioTimeUpdate,
     handleAudioEnded,
   };
